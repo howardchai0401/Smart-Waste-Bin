@@ -406,30 +406,13 @@ void setup()
 // ===============================
 //
 
-/*void loop()
-{
-    if (!client.connected())
-        reconnectMQTT();
-
-    client.loop();
-
-    readWeight();
-
-    readFillLevel();
-
-    readOdor();
-
-    if (millis() - lastPublish >= 10000)
-    {
-        lastPublish = millis();
-
-        publishData();
-    }
-}*/
-
 void loop()
 {
-    // Read all sensors
+    /*if (!client.connected())
+        reconnectMQTT();
+
+    client.loop();*/
+
     readWeight();
 
     readFillLevel();
@@ -442,4 +425,5 @@ void loop()
 
         publishData();
     }
+}
 }
