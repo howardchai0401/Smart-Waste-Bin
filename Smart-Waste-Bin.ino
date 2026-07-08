@@ -29,8 +29,8 @@ are provided.
 // ===============================
 //
 
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
+const char* ssid = "Howard's Galaxy S24+";
+const char* password = "HowardChai1234";
 
 //
 // ===============================
@@ -57,7 +57,7 @@ PubSubClient client(espClient);
 
 HX711 scale;
 
-float calibration_factor = 22500.0;
+float calibration_factor = 21500.0;
 
 float weight = 0;
 
@@ -85,6 +85,9 @@ int fillLevel = 0;
 #define MQ135_PIN 34
 
 int odorValue = 0;
+String odorStatus = "";
+
+const int MQ135_SAMPLES = 20;
 
 //
 // ===============================
@@ -102,18 +105,44 @@ unsigned long lastPublish = 0;
 
 void connectWiFi()
 {
-    Serial.print("Connecting WiFi");
+    Serial.println();
+    Serial.println("================================");
+    Serial.println("Searching for Wi-Fi...");
+    Serial.println("================================");
 
+    WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
+
+    delay(1000);
+
+    Serial.println();
+    Serial.println("Connecting to Wi-Fi...");
 
     while (WiFi.status() != WL_CONNECTED)
     {
-        delay(500);
         Serial.print(".");
+        delay(500);
     }
 
     Serial.println();
-    Serial.println("WiFi Connected");
+    Serial.println("Wi-Fi Connected!");
+
+    Serial.println();
+    Serial.println("================================");
+    Serial.println("Wi-Fi Connected Successfully!");
+    Serial.println("================================");
+
+    Serial.print("SSID           : ");
+    Serial.println(WiFi.SSID());
+
+    Serial.print("IP Address     : ");
+    Serial.println(WiFi.localIP());
+
+    Serial.print("Signal Strength: ");
+    Serial.print(WiFi.RSSI());
+    Serial.println(" dBm");
+
+    Serial.println("================================");
 }
 
 //
@@ -207,7 +236,30 @@ void readFillLevel()
 // MQ135 requires warm-up before readings become stable.
 void readOdor()
 {
-    odorValue = analogRead(MQ135_PIN);
+    long total = 0;
+
+    // Average multiple readings
+    for (int i = 0; i < MQ135_SAMPLES; i++)
+    {
+        total += analogRead(MQ135_PIN);
+        delay(20);
+    }
+
+    odorValue = total / MQ135_SAMPLES;
+
+    // Air quality classification
+    if (odorValue < 280)
+    {
+        odorStatus = "Clean Air";
+    }
+    else if (odorValue < 600)
+    {
+        odorStatus = "Moderate Air Quality";
+    }
+    else
+    {
+        odorStatus = "Poor Air Quality / Strong Gas";
+    }
 }
 
 //
@@ -218,10 +270,37 @@ void readOdor()
 
 void publishData()
 {
+    // =====================================
+    // Human-readable output
+    // =====================================
+
+    Serial.println();
+    Serial.println("================================");
+    Serial.println(" SMART WASTE BIN SENSOR DATA");
+    Serial.println("================================");
+
+    Serial.print("Weight      : ");
+    Serial.print(weight, 3);
+    Serial.println(" kg");
+
+    Serial.print("Fill Level  : ");
+    Serial.print(fillLevel);
+    Serial.println(" %");
+
+    /*Serial.print("Odor Value  : ");
+    Serial.println(odorValue);*/
+
+    Serial.print("Air Quality : ");
+    Serial.println(odorStatus);
+
+    // =====================================
+    // JSON Output
+    // =====================================
+
     String json = "{";
 
     json += "\"weight\":";
-    json += String(weight,3);
+    json += String(weight, 3);
 
     json += ",";
 
@@ -235,9 +314,11 @@ void publishData()
 
     json += "}";
 
-    Serial.println("========================");
+    Serial.println();
+    Serial.println("JSON Payload:");
     Serial.println(json);
-    Serial.println("========================");
+
+    Serial.println("===========================================");
 
     // MQTT disabled for sensor testing
     // client.publish(mqtt_topic, json.c_str());
@@ -252,42 +333,71 @@ void publishData()
 void setup()
 {
     Serial.begin(115200);
+    delay(3000);
 
-    //
-    // HX711
-    //
+    Serial.println();
+    Serial.println("================================");
+    Serial.println(" Smart Waste Bin System");
+    Serial.println("================================");
 
-    scale.begin(HX_DT,HX_SCK);
+    // ===============================
+    // HX711 Initialization
+    // ===============================
 
-    delay(15000);
+    Serial.println();
+    Serial.println("================================");
+    Serial.println("Initializing Weight Sensor...");
+    Serial.println("Please remove all rubbish from the bin.");
+    Serial.println("Calibrating in progress...");
+    Serial.println("================================");
+    delay(2000);
+
+    scale.begin(HX_DT, HX_SCK);
+
+    // 15-second countdown
+    for (int i = 15; i > 0; i--)
+    {
+        Serial.print("Taring in ");
+        Serial.print(i);
+        Serial.println(" second(s)...");
+        delay(1000);
+    }
 
     scale.set_scale(calibration_factor);
 
+    Serial.println();
+    Serial.println("Taring weight sensor...");
     scale.tare(100);
 
-    //
+    Serial.println("Weight sensor is ready.");
+    Serial.println("================================");
+    delay(1000);
+
     // Ultrasonic
-    //
+    pinMode(TRIG_PIN, OUTPUT);
+    pinMode(ECHO_PIN, INPUT);
 
-    pinMode(TRIG_PIN,OUTPUT);
-    pinMode(ECHO_PIN,INPUT);
-
-    //
     // MQ135
-    //
+    pinMode(MQ135_PIN, INPUT);
 
-    pinMode(MQ135_PIN,INPUT);
+    Serial.println();
+    Serial.println("================================");
+    Serial.println("MQ-135 Air Quality Sensor");
+    Serial.println("Warming up sensor...");
+    Serial.println("Please wait 30 seconds.");
+    Serial.println("================================");
 
-    //
-    // WiFi
-    //
+    delay(30000);
 
+    // Wi-Fi
     connectWiFi();
 
-    client.setServer(mqtt_server,mqtt_port);
+    client.setServer(mqtt_server, mqtt_port);
 
     Serial.println();
     Serial.println("Smart Bin Ready");
+    Serial.println("Waiting for sensor readings...");
+    Serial.println("================================");
 }
 
 //
