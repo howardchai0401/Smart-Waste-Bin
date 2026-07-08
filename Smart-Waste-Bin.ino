@@ -1,6 +1,27 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include "HX711.h"
+/*
+-------------------------------------------------------
+Project : Smart Waste Bin (ETP)
+Board   : ESP32 DevKitC
+Sensors :
+- HX711 + 4 Load Cells
+- HC-SR04
+- MQ135
+
+Current Version:
+Sensor testing only.
+MQTT publish temporarily disabled until broker details
+are provided.
+-------------------------------------------------------
+*/
+
+// ====================================================
+// MQTT publish is temporarily disabled.
+// Broker information will be added after the team
+// leader provides the MQTT server details.
+// ====================================================
 
 //
 // ===============================
@@ -159,7 +180,13 @@ void readFillLevel()
 
     digitalWrite(TRIG_PIN, LOW);
 
-    long duration = pulseIn(ECHO_PIN, HIGH);
+    long duration = pulseIn(ECHO_PIN, HIGH, 30000);
+
+    if(duration == 0)
+    {
+        Serial.println("Ultrasonic Timeout");
+        return;
+    }
 
     distance = duration * 0.0343 / 2.0;
 
@@ -177,7 +204,7 @@ void readFillLevel()
 // MQ135
 // ===============================
 //
-
+// MQ135 requires warm-up before readings become stable.
 void readOdor()
 {
     odorValue = analogRead(MQ135_PIN);
@@ -212,8 +239,8 @@ void publishData()
     Serial.println(json);
     Serial.println("========================");
 
-    //client.publish(mqtt_topic,json.c_str());
-    Serial.println(json);
+    // MQTT disabled for sensor testing
+    // client.publish(mqtt_topic, json.c_str());
 }
 
 //
@@ -292,6 +319,7 @@ void setup()
 
 void loop()
 {
+    // Read all sensors
     readWeight();
 
     readFillLevel();
