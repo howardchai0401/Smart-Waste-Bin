@@ -57,10 +57,21 @@ PubSubClient client(espClient);
 
 HX711 scale;
 
-float calibration_factor = 21500.0;
+float calibration_factor = 22500.0;
 
-float weight = 0;
+// Raw weight measured by HX711
+float weight = 0.0;
 
+// Stable weight used for display and MQTT
+float displayedWeight = 0.0;
+
+// Update only when additional weight exceeds 20 g
+const float UPDATE_THRESHOLD = 0.02;
+
+// Detect rubbish removal when weight decreases by more than 500 g
+const float RESET_THRESHOLD = 0.30;
+
+float lastOutputWeight = 0.0;
 //
 // ===============================
 // HC-SR04
@@ -179,18 +190,52 @@ void reconnectMQTT()
 
 void readWeight()
 {
-    float w = scale.get_units(100);
+    // Average 10 HX711 readings
+    float w = scale.get_units(10);
 
+    // Prevent negative readings
     if (w < 0)
+    {
         w = 0;
+    }
 
+    // Ignore readings below 20 g
     if (w < 0.02)
+    {
         w = 0;
+    }
 
-    if (w > 10)
-        w = 10;
+    // Maximum supported bin weight is 10 kg
+    if (w > 10.0)
+    {
+        w = 10.0;
+    }
 
+    // Store the current raw measurement
     weight = w;
+
+    // ==========================================
+    // Stable Weight Filtering
+    // ==========================================
+
+    // New rubbish added:
+    // Update only when weight increases by over 20 g
+    if (weight > displayedWeight + UPDATE_THRESHOLD)
+    {
+        displayedWeight = weight;
+    }
+
+    // Rubbish removed:
+    // Accept the lower reading when weight decreases
+    // by more than 500 g
+    else if ((displayedWeight - weight) > RESET_THRESHOLD)
+    {
+        displayedWeight = weight;
+    }
+
+    // Ignore smaller decreases caused by:
+    // load-cell drift, PVC foam deformation,
+    // mounting stress or mechanical relaxation
 }
 
 //
@@ -280,7 +325,7 @@ void publishData()
     Serial.println("================================");
 
     Serial.print("Weight      : ");
-    Serial.print(weight, 3);
+    Serial.print(displayedWeight, 3);
     Serial.println(" kg");
 
     Serial.print("Fill Level  : ");
@@ -300,7 +345,7 @@ void publishData()
     String json = "{";
 
     json += "\"weight\":";
-    json += String(weight, 3);
+    json += String(displayedWeight, 3);
 
     json += ",";
 
@@ -408,16 +453,35 @@ void setup()
 
 void loop()
 {
-    /*if (!client.connected())
-        reconnectMQTT();
-
-    client.loop();*/
-
     readWeight();
 
     readFillLevel();
 
     readOdor();
+
+    // =====================================
+    // Immediate output when weight changes
+    // =====================================
+
+    if (abs(displayedWeight - lastOutputWeight) >= UPDATE_THRESHOLD)
+    {
+        lastOutputWeight = displayedWeight;
+
+        Serial.println();
+        Serial.println("================================");
+        Serial.println(" WEIGHT CHANGE DETECTED");
+        Serial.println("================================");
+
+        Serial.print("Current Weight: ");
+        Serial.print(displayedWeight, 3);
+        Serial.println(" kg");
+
+        Serial.println("================================");
+    }
+
+    // =====================================
+    // Full sensor output every 10 seconds
+    // =====================================
 
     if (millis() - lastPublish >= 10000)
     {
@@ -425,5 +489,4 @@ void loop()
 
         publishData();
     }
-}
 }
