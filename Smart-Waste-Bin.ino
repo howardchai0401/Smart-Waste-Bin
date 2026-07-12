@@ -29,8 +29,8 @@ are provided.
 // ===============================
 //
 
-const char* ssid = "Howard's Galaxy S24+";
-const char* password = "HowardChai1234";
+const char* ssid = "Your WIFI Name";
+const char* password = "Your WIFI Password";
 
 //
 // ===============================
