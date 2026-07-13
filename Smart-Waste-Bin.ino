@@ -6,22 +6,14 @@
 Project : Smart Waste Bin (ETP)
 Board   : ESP32 DevKitC
 Sensors :
-- HX711 + 4 Load Cells
-- HC-SR04
-- MQ135
+- HX711 + 4 Load Cells  (Weight)
+- HC-SR04                (Fill Level)
+- MQ135                  (Air Quality)
 
-Current Version:
-Sensor testing only.
-MQTT publish temporarily disabled until broker details
-are provided.
+MQTT   : Enabled — publishes JSON every 10 seconds
+Broker : 10.152.10.53:1883
 -------------------------------------------------------
 */
-
-// ====================================================
-// MQTT publish is temporarily disabled.
-// Broker information will be added after the team
-// leader provides the MQTT server details.
-// ====================================================
 
 //
 // ===============================
@@ -29,8 +21,8 @@ are provided.
 // ===============================
 //
 
-const char* ssid = "Your WIFI Name";
-const char* password = "Your WIFI Password";
+const char* ssid = "Howard's Galaxy S24+";
+const char* password = "HowardChai1234";
 
 //
 // ===============================
@@ -38,7 +30,7 @@ const char* password = "Your WIFI Password";
 // ===============================
 //
 
-const char* mqtt_server = "YOUR_BROKER_IP";
+const char* mqtt_server = "10.152.10.53";
 const int mqtt_port = 1883;
 
 const char* mqtt_topic = "smartbin/data";
@@ -71,7 +63,8 @@ const float UPDATE_THRESHOLD = 0.02;
 // Detect rubbish removal when weight decreases by more than 500 g
 const float RESET_THRESHOLD = 0.30;
 
-float lastOutputWeight = 0.0;
+// Values below 200 g are considered an empty bin
+const float EMPTY_WEIGHT_THRESHOLD = 0.20;
 //
 // ===============================
 // HC-SR04
@@ -107,6 +100,19 @@ const int MQ135_SAMPLES = 20;
 //
 
 unsigned long lastPublish = 0;
+
+// ===============================
+// Immediate Update Settings
+// ===============================
+
+// Last values printed to Serial Monitor
+float lastOutputWeight = 0.0;
+int lastOutputFillLevel = 0;
+int lastOutputOdor = 0;
+
+// Significant-change thresholds
+const int FILL_CHANGE_THRESHOLD = 10;  // 10%
+const int ODOR_CHANGE_THRESHOLD = 100; // 100 ADC units
 
 //
 // ===============================
@@ -175,6 +181,7 @@ void reconnectMQTT()
         else
         {
             Serial.print("Failed : ");
+            Serial.print("rc=");
             Serial.println(client.state());
 
             delay(3000);
@@ -190,52 +197,39 @@ void reconnectMQTT()
 
 void readWeight()
 {
-    // Average 10 HX711 readings
     float w = scale.get_units(10);
 
-    // Prevent negative readings
     if (w < 0)
     {
         w = 0;
     }
 
-    // Ignore readings below 20 g
-    if (w < 0.02)
+    // Treat residual mechanical load below 200 g as zero
+    if (w < EMPTY_WEIGHT_THRESHOLD)
     {
         w = 0;
     }
 
-    // Maximum supported bin weight is 10 kg
     if (w > 10.0)
     {
         w = 10.0;
     }
 
-    // Store the current raw measurement
     weight = w;
 
-    // ==========================================
-    // Stable Weight Filtering
-    // ==========================================
-
-    // New rubbish added:
-    // Update only when weight increases by over 20 g
+    // New rubbish added
     if (weight > displayedWeight + UPDATE_THRESHOLD)
     {
         displayedWeight = weight;
     }
 
-    // Rubbish removed:
-    // Accept the lower reading when weight decreases
-    // by more than 500 g
+    // Rubbish removed
     else if ((displayedWeight - weight) > RESET_THRESHOLD)
     {
         displayedWeight = weight;
     }
 
-    // Ignore smaller decreases caused by:
-    // load-cell drift, PVC foam deformation,
-    // mounting stress or mechanical relaxation
+    // Ignore small decreases
 }
 
 //
@@ -332,8 +326,10 @@ void publishData()
     Serial.print(fillLevel);
     Serial.println(" %");
 
-    /*Serial.print("Odor Value  : ");
-    Serial.println(odorValue);*/
+    /* Odor raw value — uncomment for debugging
+    Serial.print("Odor Value  : ");
+    Serial.println(odorValue);
+    */
 
     Serial.print("Air Quality : ");
     Serial.println(odorStatus);
@@ -365,8 +361,15 @@ void publishData()
 
     Serial.println("===========================================");
 
-    // MQTT disabled for sensor testing
-    // client.publish(mqtt_topic, json.c_str());
+    // Publish via MQTT (only when connected)
+    if (client.connected())
+    {
+        client.publish(mqtt_topic, json.c_str());
+    }
+    else
+    {
+        Serial.println("MQTT disconnected — data not sent");
+    }
 }
 
 //
@@ -439,6 +442,9 @@ void setup()
 
     client.setServer(mqtt_server, mqtt_port);
 
+    // Attempt first MQTT connection
+    reconnectMQTT();
+
     Serial.println();
     Serial.println("Smart Bin Ready");
     Serial.println("Waiting for sensor readings...");
@@ -453,31 +459,73 @@ void setup()
 
 void loop()
 {
+    // =====================================
+    // MQTT — keep connection alive
+    // =====================================
+
+    // client.loop() processes incoming messages and sends
+    // keepalive pings. Must be called regularly or the
+    // broker will disconnect you within ~15 seconds.
+    if (!client.loop())
+    {
+        // Connection lost — reconnect
+        reconnectMQTT();
+    }
+
+    if (!client.connected())
+    {
+        reconnectMQTT();
+    }
+
+    // =====================================
+    // Read all sensors
+    // =====================================
+
     readWeight();
-
     readFillLevel();
-
     readOdor();
 
+    // Check whether any sensor has changed significantly
+    bool weightChanged =
+        abs(displayedWeight - lastOutputWeight) >= UPDATE_THRESHOLD;
+
+    bool fillChanged =
+        abs(fillLevel - lastOutputFillLevel) >= FILL_CHANGE_THRESHOLD;
+
+    bool odorChanged =
+        abs(odorValue - lastOutputOdor) >= ODOR_CHANGE_THRESHOLD;
+
+
     // =====================================
-    // Immediate output when weight changes
+    // Immediate sensor update
     // =====================================
 
-    if (abs(displayedWeight - lastOutputWeight) >= UPDATE_THRESHOLD)
+    if (weightChanged || fillChanged || odorChanged)
     {
-        lastOutputWeight = displayedWeight;
-
         Serial.println();
         Serial.println("================================");
-        Serial.println(" WEIGHT CHANGE DETECTED");
+        Serial.println(" SENSOR CHANGE DETECTED");
         Serial.println("================================");
 
-        Serial.print("Current Weight: ");
+        Serial.print("Weight      : ");
         Serial.print(displayedWeight, 3);
         Serial.println(" kg");
 
+        Serial.print("Fill Level  : ");
+        Serial.print(fillLevel);
+        Serial.println(" %");
+
+        Serial.print("Air Quality : ");
+        Serial.println(odorStatus);
+
         Serial.println("================================");
+
+        // Save the latest displayed values
+        lastOutputWeight = displayedWeight;
+        lastOutputFillLevel = fillLevel;
+        lastOutputOdor = odorValue;
     }
+
 
     // =====================================
     // Full sensor output every 10 seconds
@@ -488,5 +536,10 @@ void loop()
         lastPublish = millis();
 
         publishData();
+
+        // Synchronize previous values
+        lastOutputWeight = displayedWeight;
+        lastOutputFillLevel = fillLevel;
+        lastOutputOdor = odorValue;
     }
 }
